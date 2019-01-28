@@ -2,7 +2,6 @@ package br.com.poc;
 
 import br.com.poc.service.SecurityService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -13,29 +12,35 @@ import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
+import org.springframework.http.HttpHeaders;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
-import org.springframework.security.authentication.UserDetailsRepositoryReactiveAuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
-import org.springframework.security.core.userdetails.ReactiveUserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.authentication.AuthenticationWebFilter;
 import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.RouterFunctions;
 import org.springframework.web.reactive.function.server.ServerResponse;
+import reactor.core.publisher.Mono;
 
-import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 import static org.springframework.web.reactive.function.server.RequestPredicates.GET;
 
+@SpringBootApplication
 @EnableWebFluxSecurity
 @EnableReactiveMethodSecurity
-@SpringBootApplication
-public class Application implements CommandLineRunner {
+public class Application {
+
+    private static final String BEARER = "Bearer ";
+    private static final Predicate<String> matchBearerLength = authValue -> authValue.length() > BEARER.length();
+    private static final Function<String,Mono<String>> isolateBearerValue = authValue -> Mono.justOrEmpty(authValue.substring(BEARER.length()));
 
     @Autowired
     private SecurityService service;
@@ -51,33 +56,47 @@ public class Application implements CommandLineRunner {
                 .and(RouterFunctions.route(GET("/sayHelloAnonymous"), req -> ServerResponse.ok().body(this.service.sayHelloAnonymous(), String.class)));
     }
 
+
     @Bean
-    public SecurityWebFilterChain securitygWebFilterChain(ReactiveUserDetailsService userDetailsService, ServerHttpSecurity http) {
-        AuthenticationWebFilter webFilter = new AuthenticationWebFilter(this.userDetailsRepositoryReactiveAuthenticationManager(userDetailsService));
-        http.addFilterAt(webFilter, SecurityWebFiltersOrder.AUTHENTICATION);
+    public SecurityWebFilterChain securitygWebFilterChain(ServerHttpSecurity http) {
         return http
                 .csrf().disable()
+                .authorizeExchange()
+                    .pathMatchers("/oauth/token")
+                    .permitAll()
+                .and()
+                .addFilterAt(this.bearerAuthenticationFilter(), SecurityWebFiltersOrder.AUTHENTICATION)
                 .authorizeExchange().anyExchange().permitAll()
                 .and().build();
     }
 
-    @Bean
-    public ReactiveAuthenticationManager userDetailsRepositoryReactiveAuthenticationManager(ReactiveUserDetailsService userDetailsService){
-        UserDetailsRepositoryReactiveAuthenticationManager manager = new UserDetailsRepositoryReactiveAuthenticationManager(userDetailsService);
-        manager.setPasswordEncoder(this.passwordEncoder());
-        return manager;
+    private AuthenticationWebFilter bearerAuthenticationFilter() {
+        AuthenticationWebFilter filter = new AuthenticationWebFilter(this.authenticationManager());
+        filter.setServerAuthenticationConverter(
+           exchange ->
+                Mono.justOrEmpty(exchange)
+                    .flatMap(e -> Mono.justOrEmpty(e.getRequest()
+                                      .getHeaders()
+                                      .getFirst(HttpHeaders.AUTHORIZATION)))
+                    .filter(matchBearerLength)
+                    .flatMap(isolateBearerValue)
+                    .map(u -> new UsernamePasswordAuthenticationToken(u, null, AuthorityUtils.NO_AUTHORITIES))
+        );
+        return filter;
     }
 
     @Bean
-    public ReactiveUserDetailsService reactiveUserDetailsService(){
-        return username -> service.findByUsername(username).map(it -> it);
+    public ReactiveAuthenticationManager authenticationManager(){
+        return a -> this.service
+                        .findByToken(a.getName())
+                        .switchIfEmpty(Mono.defer(() -> Mono.error(new BadCredentialsException("Invalid Credentials"))))
+                        .map(u -> new UsernamePasswordAuthenticationToken(u, u.getPassword(), u.getAuthorities()))
+                        .map(it -> it);
     }
 
-    private PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
-
-
+    /*
+     * REDIS
+     */
     @Bean
     public LettuceConnectionFactory reactiveRedisConnectionFactory() {
         return new LettuceConnectionFactory();
@@ -95,14 +114,5 @@ public class Application implements CommandLineRunner {
         RedisSerializationContext.RedisSerializationContextBuilder<String, CustomUserDetails> builder = RedisSerializationContext.newSerializationContext(keySerializer);
         RedisSerializationContext<String, CustomUserDetails> context = builder.value(valueSerializer).build();
         return new ReactiveRedisTemplate<>(factory, context);
-    }
-
-    @Override
-    public void run(String... args) throws Exception {
-        String password = this.passwordEncoder().encode("password");
-        CustomUserDetails admin = new CustomUserDetails(password,"admin", Set.of(()->"ADMIN", ()->"USER"));
-        CustomUserDetails user = new CustomUserDetails(password, "user", Set.of(()->"USER"));
-        this.service.save(admin);
-        this.service.save(user);
     }
 }
