@@ -1,0 +1,5 @@
+clientWithContract('security-contract')
+
+dependencies{
+    compileOnly group: 'org.springframework.boot', name: 'spring-boot-starter-security'
+}

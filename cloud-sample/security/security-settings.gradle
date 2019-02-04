@@ -1,0 +1,6 @@
+include ':security-contract'
+project(':security-contract').projectDir = new File('./security/security-contract')
+include ':security-client'
+project(':security-client').projectDir = new File('./security/security-client')
+include ':security-service'
+project(':security-service').projectDir = new File('./security/security-service')

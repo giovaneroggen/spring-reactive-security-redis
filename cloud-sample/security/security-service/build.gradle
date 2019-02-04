@@ -1,0 +1,8 @@
+serviceWithContract('security-contract')
+
+dependencies{
+    compile group: 'org.springframework.boot', name: 'spring-boot-starter-security'
+    compile("org.springframework.boot:spring-boot-starter-data-redis-reactive")
+    compile("org.springframework.boot:spring-boot-starter-data-mongodb-reactive")
+    compile('de.flapdoodle.embed:de.flapdoodle.embed.mongo:2.1.1')
+}

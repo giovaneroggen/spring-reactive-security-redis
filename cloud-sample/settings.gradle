@@ -1,0 +1,4 @@
+rootProject.name = 'cloud-sample'
+
+include 'gateway'
+apply from: 'security/security-settings.gradle'
