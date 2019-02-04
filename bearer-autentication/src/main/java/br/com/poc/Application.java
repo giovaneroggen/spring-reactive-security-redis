@@ -2,11 +2,12 @@ package br.com.poc;
 
 import br.com.poc.service.SecurityService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.data.mongodb.repository.config.EnableReactiveMongoRepositories;
 import org.springframework.data.redis.connection.ReactiveRedisConnection;
-import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
@@ -21,22 +22,22 @@ import org.springframework.security.config.annotation.web.reactive.EnableWebFlux
 import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.core.authority.AuthorityUtils;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.authentication.AuthenticationWebFilter;
-import org.springframework.web.reactive.function.server.RouterFunction;
-import org.springframework.web.reactive.function.server.RouterFunctions;
-import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
 
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
-
-import static org.springframework.web.reactive.function.server.RequestPredicates.GET;
 
 @SpringBootApplication
 @EnableWebFluxSecurity
 @EnableReactiveMethodSecurity
-public class Application {
+@EnableReactiveMongoRepositories
+public class Application implements CommandLineRunner {
 
     private static final String BEARER = "Bearer ";
     private static final Predicate<String> matchBearerLength = authValue -> authValue.length() > BEARER.length();
@@ -45,16 +46,21 @@ public class Application {
     @Autowired
     private SecurityService service;
 
+    @Autowired
+    private UserDetailsRepository repository;
+
+
     public static void main(String[] args) {
         SpringApplication.run(Application.class, args);
     }
 
-    @Bean
-    RouterFunction<ServerResponse> routerFunctions() {
-        return RouterFunctions.route(GET("/sayHelloUser"), req -> ServerResponse.ok().body(this.service.sayHelloUser(), String.class))
-                .and(RouterFunctions.route(GET("/sayHelloAdmin"), req -> ServerResponse.ok().body(this.service.sayHelloAdmin(), String.class)))
-                .and(RouterFunctions.route(GET("/sayHelloAnonymous"), req -> ServerResponse.ok().body(this.service.sayHelloAnonymous(), String.class)));
-    }
+//    @Bean
+//    RouterFunction<ServerResponse> routerFunctions() {
+//        return RouterFunctions.route(GET("/sayHelloUser"), req -> ServerResponse.ok().body(this.service.sayHelloUser(), String.class))
+//                .and(RouterFunctions.route(GET("/sayHelloAdmin"), req -> ServerResponse.ok().body(this.service.sayHelloAdmin(), String.class)))
+//                .and(RouterFunctions.route(GET("/sayHelloAnonymous"), req -> ServerResponse.ok().body(this.service.sayHelloAnonymous(), String.class)))
+//                .and(RouterFunctions.route(GET("/principal"), req -> ServerResponse.ok().body(req.principal().cast(Principal.class), Principal.class)));
+//    }
 
 
     @Bean
@@ -90,8 +96,7 @@ public class Application {
         return a -> this.service
                         .findByToken(a.getName())
                         .switchIfEmpty(Mono.defer(() -> Mono.error(new BadCredentialsException("Invalid Credentials"))))
-                        .map(u -> new UsernamePasswordAuthenticationToken(u, u.getPassword(), u.getAuthorities()))
-                        .map(it -> it);
+                        .map(u -> new UsernamePasswordAuthenticationToken(u, u.getPassword(), u.getAuthorities()));
     }
 
     /*
@@ -108,11 +113,22 @@ public class Application {
     }
 
     @Bean
-    public ReactiveRedisTemplate<String, CustomUserDetails> reactiveRedisTemplate(ReactiveRedisConnectionFactory factory) {
+    public ReactiveRedisTemplate<String, CustomUserDetails> reactiveRedisTemplate(LettuceConnectionFactory factory) {
         StringRedisSerializer keySerializer = new StringRedisSerializer();
         Jackson2JsonRedisSerializer<CustomUserDetails> valueSerializer = new Jackson2JsonRedisSerializer<>(CustomUserDetails.class);
         RedisSerializationContext.RedisSerializationContextBuilder<String, CustomUserDetails> builder = RedisSerializationContext.newSerializationContext(keySerializer);
         RedisSerializationContext<String, CustomUserDetails> context = builder.value(valueSerializer).build();
         return new ReactiveRedisTemplate<>(factory, context);
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Override
+    public void run(String... args) throws Exception {
+        this.service.save(new CustomUserDetails("password", "admin", Set.of(new SimpleGrantedAuthority("ADMIN"), new SimpleGrantedAuthority("USER"))));
+        this.service.save(new CustomUserDetails("password", "user", Set.of(new SimpleGrantedAuthority("USER"))));
     }
 }

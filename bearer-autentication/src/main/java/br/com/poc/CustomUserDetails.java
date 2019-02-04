@@ -5,16 +5,20 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.userdetails.UserDetails;
 
 import java.util.Set;
 
 @Data
+@Document
 @NoArgsConstructor
 @AllArgsConstructor
-public class CustomUserDetails implements UserDetails {
+public class CustomUserDetails{
 
+    @Id
+    private String id;
     private String password;
     private String username;
     @JsonSerialize(using = GrantedAuthorityJsonSeserializer.class)
